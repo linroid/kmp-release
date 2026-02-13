@@ -1,6 +1,6 @@
 ---
 name: kmp-release
-description: Set up a complete release pipeline for a Kotlin Multiplatform project with GitHub Actions, version injection, ProGuard, signing, and multi-platform artifacts.
+description: Set up a complete release pipeline for a Kotlin Multiplatform project with GitHub Actions, version injection, ProGuard, signing, and multi-platform artifacts. Use when the user wants to add CI/CD release automation, configure Android signing, enable ProGuard/R8 shrinking, or create a tag-triggered GitHub Actions workflow for a KMP project targeting Android, Desktop, Web, CLI, or iOS.
 argument-hint: "[platforms: android,desktop,web,cli,ios]"
 ---
 
@@ -10,7 +10,9 @@ Platforms requested: $ARGUMENTS
 
 ## Prerequisites
 
-Before starting, read the project's existing build files (`build.gradle.kts`, `gradle.properties`, `settings.gradle.kts`, version catalog) to understand the module structure, existing dependencies, and naming conventions.
+Before starting:
+1. Read the project's existing build files (`build.gradle.kts`, `gradle.properties`, `settings.gradle.kts`, version catalog) to understand the module structure, existing dependencies, and naming conventions.
+2. Identify the project name and module paths — adapt all instructions below to match the actual project structure (e.g., `:app:android`, `:shared`, `:cli`).
 
 ## Step-by-step checklist
 
