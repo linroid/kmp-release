@@ -47,6 +47,10 @@ Work through each applicable step. Skip steps for platforms not requested. Alway
 - Create a shared `proguard-rules.pro` at the project root. Inspect the project's dependencies and add rules for:
   - **kotlinx-serialization** (if used): keep `Companion`, `$$serializer`, and `@Serializable` class members
   - **dontwarn** rules for common KMP libraries that have optional/platform-specific dependencies: Ktor, kotlinx-coroutines, Netty, SLF4J, Logback, Log4J2, OSGi, SQLDelight, etc.
+  - **ServiceLoader providers** — ProGuard strips classes only referenced via `META-INF/services`. Add explicit `-keep` rules for any ServiceLoader-discovered classes in the project's dependency tree:
+    - `-keep class org.sqlite.** { *; }` — SQLite JDBC driver (if using SQLDelight with JDBC)
+    - `-keep class io.ktor.client.engine.cio.CIOEngineContainer { *; }` — Ktor CIO engine
+    - `-keep class ch.qos.logback.classic.spi.LogbackServiceProvider { *; }` and `-keep class ch.qos.logback.classic.** { *; }` and `-keep class ch.qos.logback.core.** { *; }` — Logback SLF4J provider
 - Android: enable `isMinifyEnabled = true` and `isShrinkResources = true`, reference `rootProject.file("proguard-rules.pro")`
 - Desktop: enable via `buildTypes.release.proguard { configurationFiles.from(rootProject.file("proguard-rules.pro")) }`
 - Desktop with Ktor/Netty: add `runtimeOnly("org.apache.logging.log4j:log4j-api:<version>")` so ProGuard can resolve Netty's Log4J2Logger class hierarchy (it gets shrunk away in the final output)
@@ -75,13 +79,20 @@ DebugProbesKt.bin
 
 Inspect the APK contents (`unzip -l *.apk`) to identify additional files that can be excluded.
 
-### 6. GitHub Actions Release Workflow
+### 6. Compose Desktop Configuration
+
+If targeting Desktop (Compose):
+
+- If the app depends on SQLite (SQLDelight JDBC), add `modules("java.sql")` to the `nativeDistributions` block. Compose Desktop uses jpackage with a stripped JRE via jlink, and `java.sql` is not auto-detected.
+
+### 7. GitHub Actions Release Workflow
 
 Create `.github/workflows/release.yml`:
 - **Trigger**: `on: push: tags: ['v*']`
 - **Permissions**: `contents: write`
+- **Default shell**: set `defaults: run: shell: bash` at workflow level. The default shell on Windows runners is pwsh, which does not support `${VAR#prefix}` bash parameter expansion. Git Bash is available on all GitHub-hosted runners.
 - **Top-level env**: extract version from tag name
-- **All Gradle commands** get `-P<project>.version=<version>` (strip the `v` prefix)
+- **All Gradle commands** get `-P<project>.version=<version>` (strip the `v` prefix using bash syntax)
 
 #### Build Jobs
 
@@ -93,15 +104,17 @@ Matrix across target platforms:
 | Name | Runner | OS | Arch | Package |
 |------|--------|----|------|---------|
 | macOS-arm64 | `macos-14` | macos | aarch64 | tar.gz |
-| macOS-x64 | `macos-13` | macos | x64 | tar.gz |
 | Linux-x64 | `ubuntu-latest` | linux | x64 | tar.gz |
 | Linux-arm64 | `ubuntu-24.04-arm` | linux | aarch64 | tar.gz |
 | Windows-x64 | `windows-latest` | windows | x64 | zip |
-| Windows-arm64 | `windows-11-arm` | windows | aarch64 | zip |
+
+**Do NOT include:**
+- macOS-x64 — `macos-13` (Intel) runners have been retired. Only ARM64 macOS runners are available.
+- Windows-arm64 — GraalVM does not provide a `windows-aarch64` native-image distribution.
 
 Setup: `graalvm/setup-graalvm@v1` with java-version 21.
 Build: `./gradlew :<cli-module>:nativeCompile`.
-Package: `tar -czf` (Unix) or `Compress-Archive` (Windows).
+Package: `tar -czf` (Unix) or `7z a archive.zip file` (Windows — `Compress-Archive` is unavailable when shell is bash).
 
 **Android APK**:
 - Runner: `ubuntu-latest`, Java 17
@@ -111,13 +124,15 @@ Package: `tar -czf` (Unix) or `Compress-Archive` (Windows).
 **Desktop (Compose packaging)** — matrix:
 | Name | Runner | Task | Artifact |
 |------|--------|------|----------|
-| macOS | `macos-latest` | packageDmg | *.dmg |
-| Linux-x64 | `ubuntu-latest` | packageDeb | *.deb |
-| Linux-arm64 | `ubuntu-24.04-arm` | packageDeb | *.deb |
-| Windows-x64 | `windows-latest` | packageMsi | *.msi |
-| Windows-arm64 | `windows-11-arm` | packageMsi | *.msi |
+| macOS | `macos-latest` | packageReleaseDmg | *.dmg |
+| Linux-x64 | `ubuntu-latest` | packageReleaseDeb | *.deb |
+| Linux-arm64 | `ubuntu-24.04-arm` | packageReleaseDeb | *.deb |
+| Windows-x64 | `windows-latest` | packageReleaseMsi | *.msi |
+| Windows-arm64 | `windows-11-arm` | packageReleaseMsi | *.msi |
 
-Setup: Java 17.
+**Important:**
+- Use `packageRelease*` tasks (not `package*`). The output path is `build/compose/binaries/main-release/` (not `main/`).
+- Setup: Java 17 for most runners. **Exception:** Use Java 21 for `windows-11-arm` — Temurin JDK 17 is not available on Windows ARM64 runners.
 
 **Web (WasmJs)**:
 - Runner: `ubuntu-latest`, Java 17
@@ -129,7 +144,7 @@ Setup: Java 17.
 - Download all artifacts with `actions/download-artifact@v7` and `merge-multiple: true`
 - Create release with `softprops/action-gh-release@v2` and `generate_release_notes: true`
 
-### 7. Verification
+### 8. Verification
 
 After setup, instruct the user to:
 1. Push a test tag: `git tag v0.0.1-test && git push origin v0.0.1-test`
